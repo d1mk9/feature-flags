@@ -6,6 +6,7 @@
 - [PostgreSQL](https://www.postgresql.org/) — хранение данных
 - [golang-lru](https://github.com/hashicorp/golang-lru) — кэш в памяти
 - [Goose](https://github.com/pressly/goose) — миграции базы данных
+- [Makefile](Makefile) — удобные команды для миграций и запуска
 
 ---
 
@@ -46,22 +47,30 @@ git clone https://github.com/d1mk9/feature-flags.git
 cd feature-flags
 ```
 
-### 2. Настроить Postgres и переменные окружения
+### 2. Настроить Postgres и окружение
 Создай файл `.env` в корне:
 ```env
-POSTGRES_DSN=postgres://postgres:postgres@localhost:5432/featuredb?sslmode=disable
-HTTP_PORT=8080
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+```
+
+А параметры подключения к БД указываются в `conf/config.yaml`:
+```yaml
+postgres:
+  host: localhost
+  port: 5432
+  db: featuredb
 ```
 
 ### 3. Применить миграции
+Используется `goose`, а также `make` для удобства:
 ```bash
-go install github.com/pressly/goose/v3/cmd/goose@latest
-goose -dir ./migrations postgres "$POSTGRES_DSN" up
+make migrate-up
 ```
 
 ### 4. Запустить сервис
 ```bash
-go run ./cmd/app
+make run
 ```
 
 Сервис будет доступен по адресу:  
@@ -75,12 +84,16 @@ go run ./cmd/app
 .
 ├── cmd/app/main.go        # Точка входа
 ├── pkg/
-│   ├── config/            # Загрузка конфигурации (.env)
+│   ├── config/            # Загрузка конфигурации (.env + config.yaml)
 │   ├── handlers/          # HTTP-хендлеры
 │   ├── http/              # Сервер + маршрутизация
+│   ├── models/            # Reform-модели
+│   ├── repository/        # Работа с Postgres через Reform/Bob
 │   ├── service/           # Бизнес-логика + кэш
-│   └── storage/           # Работа с Postgres
+│   └── storage/           # Инициализация Postgres
 ├── migrations/            # Goose-миграции
+├── conf/config.yaml       # Конфигурация БД
+├── Makefile               # Утилитные команды (migrate/run)
 └── README.md
 ```
 

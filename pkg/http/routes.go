@@ -8,7 +8,7 @@ import (
 )
 
 func RegisterRoutes(api huma.API, svc service.Vars) {
-	h := &handlers.VarsHandler{Svc: svc}
+	h := handlers.NewVarsHandler(svc)
 
 	huma.Get(api, "/var/{var_name}", h.GetVar,
 		func(op *huma.Operation) { op.Description = "Get variable value (15 min in-memory cache)" },

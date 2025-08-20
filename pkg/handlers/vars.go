@@ -2,74 +2,71 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"time"
 
+	"feature-flags/pkg/repository"
 	"feature-flags/pkg/service"
 
 	"github.com/danielgtaylor/huma/v2"
 )
 
 type VarsHandler struct {
-	Svc service.Vars
+	svc service.Vars
 }
 
-// ==== I/O схемы ====
+func NewVarsHandler(svc service.Vars) *VarsHandler {
+	return &VarsHandler{svc: svc}
+}
 
 type GetVarInput struct {
 	VarName string `path:"var_name"`
 }
+
 type GetVarResp struct {
-	Body struct {
-		Key   string      `json:"key"`
-		Value interface{} `json:"value"`
-	}
+	Key   string          `json:"key"`
+	Value json.RawMessage `json:"value"`
 }
 
 type SetVarReq struct {
-	Body struct {
-		Key   string          `json:"key"   required:"true"`
-		Value json.RawMessage `json:"value" required:"true"`
-	}
-}
-type SetVarResp struct {
-	Body struct {
-		Message string `json:"message"`
-	}
+	Key   string          `json:"key"   required:"true"`
+	Value json.RawMessage `json:"value" required:"true"`
 }
 
-// ==== Handlers ====
+type SetVarResp struct {
+	Message string `json:"message"`
+}
 
 func (h *VarsHandler) GetVar(ctx context.Context, in *GetVarInput) (*GetVarResp, error) {
-	raw, err := h.Svc.GetValue(in.VarName)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	raw, err := h.svc.GetValue(ctx, in.VarName)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, huma.Error404NotFound("variable not found")
 		}
-		return nil, huma.Error500InternalServerError(fmt.Sprintf("db: %v", err))
+		return nil, huma.Error500InternalServerError("internal error")
 	}
 
-	var any interface{}
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &any)
-	}
-
-	out := &GetVarResp{}
-	out.Body.Key = in.VarName
-	out.Body.Value = any
-	return out, nil
+	return &GetVarResp{
+		Key:   in.VarName,
+		Value: raw,
+	}, nil
 }
 
 func (h *VarsHandler) SetVar(ctx context.Context, in *SetVarReq) (*SetVarResp, error) {
-	if in == nil || in.Body.Key == "" {
+	if in == nil || in.Key == "" {
 		return nil, huma.Error400BadRequest("key is required")
 	}
-	if err := h.Svc.SetValue(in.Body.Key, in.Body.Value); err != nil {
-		return nil, huma.Error500InternalServerError(fmt.Sprintf("db: %v", err))
+
+	if err := h.svc.SetValue(ctx, in.Key, in.Value); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, huma.Error404NotFound("variable not found")
+		}
+		return nil, huma.Error500InternalServerError("internal error")
 	}
 
-	out := &SetVarResp{}
-	out.Body.Message = "var successfully updated"
-	return out, nil
+	return &SetVarResp{Message: "var successfully updated"}, nil
 }

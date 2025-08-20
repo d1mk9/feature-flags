@@ -1,43 +1,69 @@
 package config
 
 import (
-	"fmt"
 	"log"
+	"net/url"
 	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
 )
 
 type Config struct {
-	PostgresDSN string
-	HTTPPort    string
+	PostgresHost string
+	PostgresPort int
+	PostgresDB   string
+
+	PostgresUser     string
+	PostgresPassword string
+}
+
+func (c Config) PostgresDSN() string {
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(c.PostgresUser, c.PostgresPassword),
+		Host:   c.PostgresHost + ":" + strconv.Itoa(c.PostgresPort),
+		Path:   "/" + c.PostgresDB,
+	}
+	q := url.Values{"sslmode": []string{"disable"}}
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func MustLoad() *Config {
-	requiredVars := []string{
-		"POSTGRES_HOST",
-		"POSTGRES_PORT",
-		"POSTGRES_USER",
-		"POSTGRES_PASSWORD",
-		"POSTGRES_DB",
-		"HTTP_PORT",
+	_ = godotenv.Load()
+	v := viper.New()
+	v.SetConfigName("config")
+	v.SetConfigType("yaml")
+
+	if cp := os.Getenv("CONFIG_PATH"); cp != "" {
+		v.AddConfigPath(cp)
+	}
+	v.AddConfigPath("conf")
+	v.AddConfigPath("./conf")
+	v.AddConfigPath("../conf")
+	v.AddConfigPath("../../conf")
+
+	if err := v.ReadInConfig(); err != nil {
+		log.Fatalf("config: read file error: %v", err)
 	}
 
-	for _, v := range requiredVars {
-		if os.Getenv(v) == "" {
-			log.Fatalf("❌ missing required environment variable: %s", v)
-		}
+	cfg := &Config{
+		PostgresHost: v.GetString("postgres.host"),
+		PostgresPort: v.GetInt("postgres.port"),
+		PostgresDB:   v.GetString("postgres.db"),
 	}
 
-	dsn := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		os.Getenv("POSTGRES_USER"),
-		os.Getenv("POSTGRES_PASSWORD"),
-		os.Getenv("POSTGRES_HOST"),
-		os.Getenv("POSTGRES_PORT"),
-		os.Getenv("POSTGRES_DB"),
-	)
+	cfg.PostgresUser = os.Getenv("POSTGRES_USER")
+	cfg.PostgresPassword = os.Getenv("POSTGRES_PASSWORD")
 
-	return &Config{
-		PostgresDSN: dsn,
-		HTTPPort:    os.Getenv("HTTP_PORT"),
+	if cfg.PostgresHost == "" || cfg.PostgresPort == 0 || cfg.PostgresDB == "" {
+		log.Fatal("config: postgres.host, postgres.port, postgres.db are required")
 	}
+	if cfg.PostgresUser == "" || cfg.PostgresPassword == "" {
+		log.Fatal("config: POSTGRES_USER and POSTGRES_PASSWORD env vars are required")
+	}
+
+	return cfg
 }

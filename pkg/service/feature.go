@@ -1,77 +1,106 @@
 package service
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"time"
+
+	"feature-flags/pkg/repository"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
-// Vars — интерфейс, который используют хендлеры
 type Vars interface {
-	GetValue(key string) (json.RawMessage, error)
-	SetValue(key string, value json.RawMessage) error
+	GetValue(ctx context.Context, key string) (json.RawMessage, error)
+	SetValue(ctx context.Context, key string, value json.RawMessage) error
 }
 
-// внутренний элемент кэша с TTL
 type cachedItem struct {
 	val      json.RawMessage
 	cachedAt time.Time
 	ttl      time.Duration
 }
 
-// FeatureService — реализация Vars
 type FeatureService struct {
-	db    *sql.DB
-	cache *lru.Cache[string, cachedItem]
-	ttl   time.Duration
+	repo    repository.Repository
+	advRepo repository.AdvancedRepository
+	cache   *lru.Cache[string, cachedItem]
+	ttl     time.Duration
 }
 
-func NewFeatureService(db *sql.DB, cacheSize int, ttlMinutes int) *FeatureService {
+func NewFeatureService(repo repository.Repository, cacheSize int, ttlMinutes int) (*FeatureService, error) {
 	c, err := lru.New[string, cachedItem](cacheSize)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("create LRU cache: %w", err)
+	}
+	var adv repository.AdvancedRepository
+	if a, ok := repo.(repository.AdvancedRepository); ok {
+		adv = a
 	}
 	return &FeatureService{
-		db:    db,
-		cache: c,
-		ttl:   time.Duration(ttlMinutes) * time.Minute,
-	}
+		repo:    repo,
+		advRepo: adv,
+		cache:   c,
+		ttl:     time.Duration(ttlMinutes) * time.Minute,
+	}, nil
 }
 
-func (s *FeatureService) GetValue(key string) (json.RawMessage, error) {
+func (s *FeatureService) GetValue(ctx context.Context, key string) (json.RawMessage, error) {
 	if ci, ok := s.cache.Get(key); ok {
 		if time.Since(ci.cachedAt) < ci.ttl {
 			return ci.val, nil
 		}
-		s.cache.Remove(key) // TTL истёк
+		s.cache.Remove(key)
 	}
 
-	var value json.RawMessage
-	err := s.db.QueryRow(`SELECT value FROM features WHERE key = $1`, key).Scan(&value)
+	value, err := s.repo.GetValue(ctx, key)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, sql.ErrNoRows
-		}
-		return nil, err
+		return nil, fmt.Errorf("service.GetValue key=%q: %w", key, err)
 	}
 
-	s.cache.Add(key, cachedItem{val: value, cachedAt: time.Now(), ttl: s.ttl})
+	s.cache.Add(key, cachedItem{
+		val:      value,
+		cachedAt: time.Now(),
+		ttl:      s.ttl,
+	})
 	return value, nil
 }
 
-func (s *FeatureService) SetValue(key string, value json.RawMessage) error {
-	_, err := s.db.Exec(`
-		INSERT INTO features (key, value, enabled)
-		VALUES ($1, $2, true)
-		ON CONFLICT (key) DO UPDATE
-		SET value = EXCLUDED.value, updated_at = now()
-	`, key, value)
-	if err != nil {
-		return err
+func (s *FeatureService) SetValue(ctx context.Context, key string, value json.RawMessage) error {
+	if err := s.repo.UpsertValue(ctx, key, value); err != nil {
+		return fmt.Errorf("service.SetValue key=%q: %w", key, err)
 	}
-	s.cache.Remove(key) // инвалидация
+	s.cache.Remove(key)
 	return nil
+}
+
+var ErrNotImplemented = repository.ErrNotImplemented
+
+func (s *FeatureService) ListFeatures(ctx context.Context, f repository.FeatureListFilters) ([]repository.FeatureRow, error) {
+	if s.advRepo == nil {
+		return nil, ErrNotImplemented
+	}
+	return s.advRepo.ListFeatures(ctx, f)
+}
+
+func (s *FeatureService) CountFeatures(ctx context.Context, f repository.FeatureListFilters) (int64, error) {
+	if s.advRepo == nil {
+		return 0, ErrNotImplemented
+	}
+	return s.advRepo.CountFeatures(ctx, f)
+}
+
+func (s *FeatureService) GetFeaturesByKeys(ctx context.Context, keys []string) ([]repository.FeatureRow, error) {
+	if s.advRepo == nil {
+		return nil, ErrNotImplemented
+	}
+	return s.advRepo.GetFeaturesByKeys(ctx, keys)
+}
+
+func (s *FeatureService) SearchFeaturesJSON(ctx context.Context, jsonExpr string, limit, offset int) ([]repository.FeatureRow, error) {
+	if s.advRepo == nil {
+		return nil, ErrNotImplemented
+	}
+	return s.advRepo.SearchFeaturesJSON(ctx, jsonExpr, limit, offset)
 }
