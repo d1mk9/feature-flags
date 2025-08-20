@@ -6,6 +6,8 @@
 - [PostgreSQL](https://www.postgresql.org/) — хранение данных
 - [golang-lru](https://github.com/hashicorp/golang-lru) — кэш в памяти
 - [Goose](https://github.com/pressly/goose) — миграции базы данных
+- [Cobra](https://github.com/spf13/cobra) — CLI (запуск сервиса, миграции и пр.)
+- [Viper](https://github.com/spf13/viper) — конфигурация (env + yaml)
 - [Makefile](Makefile) — удобные команды для миграций и запуска
 
 ---
@@ -63,12 +65,22 @@ postgres:
 ```
 
 ### 3. Применить миграции
-Используется `goose`, а также `make` для удобства:
+Можно через **Makefile**:
 ```bash
 make migrate-up
 ```
 
+или через **Cobra CLI**:
+```bash
+go run ./cmd/app migrate up
+```
+
 ### 4. Запустить сервис
+```bash
+go run ./cmd/app serve
+```
+
+или через Makefile:
 ```bash
 make run
 ```
@@ -82,18 +94,22 @@ make run
 
 ```
 .
-├── cmd/app/main.go        # Точка входа
+├── cmd/                  # Cobra-команды (serve, migrate)
+│   ├── app/main.go       # Точка входа
+│   ├── root.go           # Root-команда
+│   ├── serve.go          # Запуск сервера
+│   └── migrate.go        # Управление миграциями
 ├── pkg/
-│   ├── config/            # Загрузка конфигурации (.env + config.yaml)
-│   ├── handlers/          # HTTP-хендлеры
-│   ├── http/              # Сервер + маршрутизация
-│   ├── models/            # Reform-модели
-│   ├── repository/        # Работа с Postgres через Reform/Bob
-│   ├── service/           # Бизнес-логика + кэш
-│   └── storage/           # Инициализация Postgres
-├── migrations/            # Goose-миграции
-├── conf/config.yaml       # Конфигурация БД
-├── Makefile               # Утилитные команды (migrate/run)
+│   ├── config/           # Конфигурация (Viper, env + yaml)
+│   ├── handlers/         # HTTP-хендлеры
+│   ├── http/             # Сервер + маршрутизация
+│   ├── models/           # Reform-модели
+│   ├── repository/       # Репозиторий (Postgres, Reform, Bob)
+│   ├── service/          # Бизнес-логика + кэш
+│   └── storage/          # Инициализация Postgres
+├── migrations/           # Goose-миграции
+├── conf/config.yaml      # Конфигурация БД
+├── Makefile              # Утилитные команды (migrate/run)
 └── README.md
 ```
 

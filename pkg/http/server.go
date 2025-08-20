@@ -37,6 +37,10 @@ func NewServer(cfg *config.Config, svc service.Vars) *Server {
 	return &Server{app: app, api: api, service: svc, cfg: cfg}
 }
 
+func (s *Server) App() *fiber.App {
+	return s.app
+}
+
 func (s *Server) Run(addr string) error {
 	return s.app.Listen(addr)
 }

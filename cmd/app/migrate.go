@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"fmt"
@@ -6,9 +6,13 @@ import (
 
 	"feature-flags/pkg/config"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/lib/pq"
 	"github.com/pressly/goose/v3"
 	"github.com/spf13/cobra"
 )
+
+const migrationsDir = "migrations"
 
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
@@ -27,10 +31,9 @@ var migrateUpCmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		if err := goose.Up(db, "migrations"); err != nil {
+		if err := goose.Up(db, migrationsDir); err != nil {
 			log.Fatalf("goose up: %v", err)
 		}
-
 		fmt.Println("✅ Миграции применены")
 	},
 }
@@ -47,10 +50,9 @@ var migrateDownCmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		if err := goose.Down(db, "migrations"); err != nil {
+		if err := goose.Down(db, migrationsDir); err != nil {
 			log.Fatalf("goose down: %v", err)
 		}
-
 		fmt.Println("✅ Миграция откатилась")
 	},
 }
