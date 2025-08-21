@@ -1,5 +1,7 @@
 package main
 
+import "feature-flags/cmd"
+
 func main() {
-	Execute()
+	cmd.Execute()
 }

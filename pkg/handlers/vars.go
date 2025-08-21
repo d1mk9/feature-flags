@@ -20,22 +20,33 @@ func NewVarsHandler(svc service.Vars) *VarsHandler {
 	return &VarsHandler{svc: svc}
 }
 
+type GetVarBody struct {
+	Key   string          `json:"key"`
+	Value json.RawMessage `json:"value"`
+}
+
 type GetVarInput struct {
 	VarName string `path:"var_name"`
 }
 
 type GetVarResp struct {
-	Key   string          `json:"key"`
-	Value json.RawMessage `json:"value"`
+	Body GetVarBody `body:""`
 }
 
+type SetVarReqBody struct {
+	Key   string `json:"key"   required:"true"`
+	Value any    `json:"value" required:"true"`
+}
 type SetVarReq struct {
-	Key   string          `json:"key"   required:"true"`
-	Value json.RawMessage `json:"value" required:"true"`
+	Body SetVarReqBody `body:""`
+}
+
+type SetVarRespBody struct {
+	Message string `json:"message"`
 }
 
 type SetVarResp struct {
-	Message string `json:"message"`
+	Body SetVarRespBody `body:""`
 }
 
 func (h *VarsHandler) GetVar(ctx context.Context, in *GetVarInput) (*GetVarResp, error) {
@@ -51,22 +62,36 @@ func (h *VarsHandler) GetVar(ctx context.Context, in *GetVarInput) (*GetVarResp,
 	}
 
 	return &GetVarResp{
-		Key:   in.VarName,
-		Value: raw,
+		Body: GetVarBody{
+			Key:   in.VarName,
+			Value: raw,
+		},
 	}, nil
 }
 
 func (h *VarsHandler) SetVar(ctx context.Context, in *SetVarReq) (*SetVarResp, error) {
-	if in == nil || in.Key == "" {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	if in == nil || in.Body.Key == "" {
 		return nil, huma.Error400BadRequest("key is required")
 	}
 
-	if err := h.svc.SetValue(ctx, in.Key, in.Value); err != nil {
+	raw, err := json.Marshal(in.Body.Value)
+	if err != nil {
+		return nil, huma.Error400BadRequest("invalid value JSON")
+	}
+
+	if err := h.svc.SetValue(ctx, in.Body.Key, raw); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, huma.Error404NotFound("variable not found")
 		}
 		return nil, huma.Error500InternalServerError("internal error")
 	}
 
-	return &SetVarResp{Message: "var successfully updated"}, nil
+	return &SetVarResp{
+		Body: SetVarRespBody{
+			Message: "var successfully updated",
+		},
+	}, nil
 }
