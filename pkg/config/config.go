@@ -4,7 +4,6 @@ import (
 	"log"
 	"net/url"
 	"os"
-	"strconv"
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
@@ -12,7 +11,7 @@ import (
 
 type Config struct {
 	PostgresHost string
-	PostgresPort int
+	PostgresPort string
 	PostgresDB   string
 
 	PostgresUser     string
@@ -23,7 +22,7 @@ func (c Config) PostgresDSN() string {
 	u := &url.URL{
 		Scheme: "postgres",
 		User:   url.UserPassword(c.PostgresUser, c.PostgresPassword),
-		Host:   c.PostgresHost + ":" + strconv.Itoa(c.PostgresPort),
+		Host:   c.PostgresHost + ":" + c.PostgresPort,
 		Path:   "/" + c.PostgresDB,
 	}
 	q := url.Values{"sslmode": []string{"disable"}}
@@ -51,14 +50,14 @@ func MustLoad() *Config {
 
 	cfg := &Config{
 		PostgresHost: v.GetString("postgres.host"),
-		PostgresPort: v.GetInt("postgres.port"),
+		PostgresPort: v.GetString("postgres.port"),
 		PostgresDB:   v.GetString("postgres.db"),
 	}
 
 	cfg.PostgresUser = os.Getenv("POSTGRES_USER")
 	cfg.PostgresPassword = os.Getenv("POSTGRES_PASSWORD")
 
-	if cfg.PostgresHost == "" || cfg.PostgresPort == 0 || cfg.PostgresDB == "" {
+	if cfg.PostgresHost == "" || cfg.PostgresPort == "" || cfg.PostgresDB == "" {
 		log.Fatal("config: postgres.host, postgres.port, postgres.db are required")
 	}
 	if cfg.PostgresUser == "" || cfg.PostgresPassword == "" {

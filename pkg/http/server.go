@@ -15,11 +15,11 @@ import (
 type Server struct {
 	app     *fiber.App
 	api     huma.API
-	service service.Vars
+	service service.Flags
 	cfg     *config.Config
 }
 
-func NewServer(cfg *config.Config, svc service.Vars) *Server {
+func NewServer(cfg *config.Config, svc service.Flags) *Server {
 	app := fiber.New(fiber.Config{
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,

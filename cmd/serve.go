@@ -5,7 +5,6 @@ import (
 	"log"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"feature-flags/pkg/config"
 	httpapi "feature-flags/pkg/http"
@@ -43,14 +42,7 @@ var serveCmd = &cobra.Command{
 		defer stop()
 
 		errCh := make(chan error, 1)
-		go func() {
-			log.Printf("server is running on %s", addr)
-			if err := srv.Run(addr); err != nil {
-				errCh <- err
-				return
-			}
-			errCh <- nil
-		}()
+		go func() { errCh <- srv.Run(addr) }()
 
 		select {
 		case <-ctx.Done():
@@ -61,13 +53,9 @@ var serveCmd = &cobra.Command{
 			}
 		}
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		if err := srv.Shutdown(shutdownCtx); err != nil {
+		if err := srv.Shutdown(context.Background()); err != nil {
 			log.Printf("shutdown error: %v", err)
 		}
-
 		log.Println("server stopped gracefully")
 	},
 }

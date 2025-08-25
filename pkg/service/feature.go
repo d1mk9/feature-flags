@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,22 +12,21 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
-type Vars interface {
-	GetValue(ctx context.Context, key string) (json.RawMessage, error)
-	SetValue(ctx context.Context, key string, value json.RawMessage) error
+type Flags interface {
+	GetValue(ctx context.Context, key string) (FeatureValue, error)
+	SetValue(ctx context.Context, key string, value FeatureValue) error
 }
 
 type cachedItem struct {
-	val      json.RawMessage
+	raw      json.RawMessage
 	cachedAt time.Time
 	ttl      time.Duration
 }
 
 type FeatureService struct {
-	repo    repository.Repository
-	advRepo repository.AdvancedRepository
-	cache   *lru.Cache[string, cachedItem]
-	ttl     time.Duration
+	repo  repository.Repository
+	cache *lru.Cache[string, cachedItem]
+	ttl   time.Duration
 }
 
 func NewFeatureService(repo repository.Repository, cacheSize int, ttlMinutes int) (*FeatureService, error) {
@@ -34,73 +34,63 @@ func NewFeatureService(repo repository.Repository, cacheSize int, ttlMinutes int
 	if err != nil {
 		return nil, fmt.Errorf("create LRU cache: %w", err)
 	}
-	var adv repository.AdvancedRepository
-	if a, ok := repo.(repository.AdvancedRepository); ok {
-		adv = a
-	}
+
 	return &FeatureService{
-		repo:    repo,
-		advRepo: adv,
-		cache:   c,
-		ttl:     time.Duration(ttlMinutes) * time.Minute,
+		repo:  repo,
+		cache: c,
+		ttl:   time.Duration(ttlMinutes) * time.Minute,
 	}, nil
 }
 
-func (s *FeatureService) GetValue(ctx context.Context, key string) (json.RawMessage, error) {
-	if ci, ok := s.cache.Get(key); ok {
-		if time.Since(ci.cachedAt) < ci.ttl {
-			return ci.val, nil
-		}
-		s.cache.Remove(key)
+func (s *FeatureService) getFromCache(key string) (json.RawMessage, bool) {
+	if ci, ok := s.cache.Get(key); ok && time.Since(ci.cachedAt) < ci.ttl {
+		return ci.raw, true
 	}
 
-	value, err := s.repo.GetValue(ctx, key)
-	if err != nil {
-		return nil, fmt.Errorf("service.GetValue key=%q: %w", key, err)
-	}
-
-	s.cache.Add(key, cachedItem{
-		val:      value,
-		cachedAt: time.Now(),
-		ttl:      s.ttl,
-	})
-	return value, nil
+	s.cache.Remove(key)
+	return nil, false
 }
 
-func (s *FeatureService) SetValue(ctx context.Context, key string, value json.RawMessage) error {
-	if err := s.repo.UpsertValue(ctx, key, value); err != nil {
-		return fmt.Errorf("service.SetValue key=%q: %w", key, err)
+func (s *FeatureService) putToCache(key string, raw json.RawMessage) {
+	s.cache.Add(key, cachedItem{raw: raw, cachedAt: time.Now(), ttl: s.ttl})
+}
+
+func (s *FeatureService) GetValue(ctx context.Context, key string) (FeatureValue, error) {
+	if raw, ok := s.getFromCache(key); ok {
+		var v FeatureValue
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return FeatureValue{}, err
+		}
+		return v, nil
+	}
+
+	raw, err := s.repo.GetValueByKey(ctx, key)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return FeatureValue{}, ErrNotFound
+		}
+		return FeatureValue{}, fmt.Errorf("get value: %w", err)
+	}
+	s.putToCache(key, raw)
+
+	var v FeatureValue
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return FeatureValue{}, err
+	}
+	return v, nil
+}
+
+func (s *FeatureService) SetValue(ctx context.Context, key string, value FeatureValue) error {
+	if !value.Validate() {
+		return ErrUnsupportedType
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("encode value: %w", err)
+	}
+	if err := s.repo.SetValueByKey(ctx, key, raw); err != nil {
+		return fmt.Errorf("set value: %w", err)
 	}
 	s.cache.Remove(key)
 	return nil
-}
-
-var ErrNotImplemented = repository.ErrNotImplemented
-
-func (s *FeatureService) ListFeatures(ctx context.Context, f repository.FeatureListFilters) ([]repository.FeatureRow, error) {
-	if s.advRepo == nil {
-		return nil, ErrNotImplemented
-	}
-	return s.advRepo.ListFeatures(ctx, f)
-}
-
-func (s *FeatureService) CountFeatures(ctx context.Context, f repository.FeatureListFilters) (int64, error) {
-	if s.advRepo == nil {
-		return 0, ErrNotImplemented
-	}
-	return s.advRepo.CountFeatures(ctx, f)
-}
-
-func (s *FeatureService) GetFeaturesByKeys(ctx context.Context, keys []string) ([]repository.FeatureRow, error) {
-	if s.advRepo == nil {
-		return nil, ErrNotImplemented
-	}
-	return s.advRepo.GetFeaturesByKeys(ctx, keys)
-}
-
-func (s *FeatureService) SearchFeaturesJSON(ctx context.Context, jsonExpr string, limit, offset int) ([]repository.FeatureRow, error) {
-	if s.advRepo == nil {
-		return nil, ErrNotImplemented
-	}
-	return s.advRepo.SearchFeaturesJSON(ctx, jsonExpr, limit, offset)
 }

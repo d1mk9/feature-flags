@@ -19,34 +19,35 @@ func NewPostgresRepository(rdb *reform.DB) *PostgresRepository {
 	return &PostgresRepository{db: rdb}
 }
 
-func (r *PostgresRepository) GetValue(ctx context.Context, key string) (json.RawMessage, error) {
-	rec, err := r.db.WithContext(ctx).FindOneFrom(models.FeaturesTable, "key", key)
-	if err != nil {
+func (r *PostgresRepository) GetValueByKey(ctx context.Context, key string) (json.RawMessage, error) {
+	var f models.Features
+	if err := r.db.WithContext(ctx).FindOneTo(&f, "key", key); err != nil {
 		if errors.Is(err, reform.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("repo.GetValue find key=%q: %w", key, err)
 	}
-	return rec.(*models.Features).Value, nil
+	return f.Value, nil
 }
 
-func (r *PostgresRepository) UpsertValue(ctx context.Context, key string, value json.RawMessage) error {
-	rec, err := r.db.WithContext(ctx).FindOneFrom(models.FeaturesTable, "key", key)
+func (r *PostgresRepository) SetValueByKey(ctx context.Context, key string, value json.RawMessage) error {
+	var f models.Features
+	err := r.db.WithContext(ctx).FindOneTo(&f, "key", key)
 	switch {
 	case err == nil:
-		f := rec.(*models.Features)
 		f.Value = value
-		if err := r.db.WithContext(ctx).Update(f); err != nil {
+		if err := r.db.WithContext(ctx).Update(&f); err != nil {
 			return fmt.Errorf("repo.UpsertValue update key=%q: %w", key, err)
 		}
 		return nil
 
 	case errors.Is(err, reform.ErrNoRows):
-		if err := r.db.WithContext(ctx).Insert(&models.Features{
+		f = models.Features{
 			Key:     key,
 			Enabled: true,
 			Value:   value,
-		}); err != nil {
+		}
+		if err := r.db.WithContext(ctx).Insert(&f); err != nil {
 			return fmt.Errorf("repo.UpsertValue insert key=%q: %w", key, err)
 		}
 		return nil
